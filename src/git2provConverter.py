@@ -78,25 +78,40 @@ def iterate_tree(tree:pygit2.Tree, fileDict:Dict,commit_id, prefix:str=""):
 def iterate_repository(repo):
     # fileSet:Set[Tuple[pygit2.Oid, str]] = set()
     fileDict:Dict = {}
+    fileSet = set()
+    commitDict = {}
     print("# ITERATE REPO")
     for branch_name in list(repo.branches):
         branch = repo.branches.get(branch_name)
 
         latest_commit = branch.target
-
+        prev = None
         if (type(latest_commit) != str):
             try:
-                for commit in repo.walk(latest_commit, pygit2.GIT_SORT_TIME):
-                    
-                    fileList = iterate_tree(commit.tree, fileDict, commit.id)
+                for commit in repo.walk(latest_commit):
+
+                    if (prev is not None):
+                        diff = commit.tree.diff_to_tree(prev.tree)
+                        for patch in diff:
+                            file = patch.delta.new_file.path
+                            fileSet.add(file)
+                            if commitDict.get(commit.id):
+                                commitDict[commit.id].append(file)
+                            else:
+                                commitDict[commit.id] = [file]
+
+                    if commit.parents:
+                        prev = commit
+                        commit = commit.parents[0]
             except ValueError:
                 print("##### START ERROR")
                 print(branch_name)
                 print(branch)   
                 print(latest_commit)
                 print("##### END ERROR")
-    print(fileDict)
-    return fileDict
+    print(fileSet)
+    print(commitDict)
+    return fileSet
 
 def clone(giturl:str, repositoryPath:path):
     print("clone")
