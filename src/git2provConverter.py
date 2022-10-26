@@ -1,6 +1,6 @@
 import imp
 from os import path
-from typing import Tuple, Set
+from typing import Dict, Tuple, Set
 import pygit2
 import prov.model as prov
 
@@ -43,8 +43,8 @@ def convertRepositoryToProv(repo:pygit2.Repository, serialization, requestUrl, o
     bundle = list(provObject.bundles)[0]
     
 
-    fileList = iterate_repository(repo)
-    for name in set([x[2] for x in fileList]):
+    fileDict = iterate_repository(repo)
+    for name in fileDict:
         #  Because all identifiers need to be QNames in PROV, and we need valid turtle as well, we need to get rid of the slashes, spaces and dots
         currentEntity = re.sub(r'[\/. ]',"-", name) 
 
@@ -53,16 +53,31 @@ def convertRepositoryToProv(repo:pygit2.Repository, serialization, requestUrl, o
 
     return provObject
 
-def iterate_tree(tree:pygit2.Tree, fileList:Set[Tuple[pygit2.Oid, str]],commit_id, prefix:str=""):
+# def iterate_tree(tree:pygit2.Tree, fileList:Set[Tuple[pygit2.Oid, str]],commit_id, prefix:str=""):
+def iterate_tree(tree:pygit2.Tree, fileDict:Dict,commit_id, prefix:str=""):
+    print(commit_id)
+    # if (prefix != ""):
+    #     for obj in tree:                 # Iteration
+    #         print(obj.id, obj.type_str, obj.name)
+    #         # TODO: Why does the "screenshot" tree list ALL screenshot files? Shouldn't it be only one? because only one screenshot is added per commit?
+    #  TODO: https://stackoverflow.com/a/28389889
+        
+    #     return fileDict
+
     for obj in tree:
         if (obj.type_str == "blob"):
-            fileList.add((commit_id, obj.id, prefix + obj.name))
+            if (fileDict.get(prefix+obj.name)):
+                fileDict[prefix+obj.name].add(obj.id)
+            else:
+                fileDict[prefix+obj.name] = set([obj.id])
+            # fileList.add((commit_id, obj.id, prefix + obj.name))
         else:
-            iterate_tree(obj, fileList,commit_id, prefix=obj.name+"/")
-    return fileList
+            iterate_tree(obj, fileDict,commit_id, prefix=obj.name+"/")
+    return fileDict
 
 def iterate_repository(repo):
-    fileSet:Set[Tuple[pygit2.Oid, str]] = set()
+    # fileSet:Set[Tuple[pygit2.Oid, str]] = set()
+    fileDict:Dict = {}
     print("# ITERATE REPO")
     for branch_name in list(repo.branches):
         branch = repo.branches.get(branch_name)
@@ -72,15 +87,16 @@ def iterate_repository(repo):
         if (type(latest_commit) != str):
             try:
                 for commit in repo.walk(latest_commit, pygit2.GIT_SORT_TIME):
-                    fileList = iterate_tree(commit.tree, fileSet, commit.id)
+                    
+                    fileList = iterate_tree(commit.tree, fileDict, commit.id)
             except ValueError:
                 print("##### START ERROR")
                 print(branch_name)
                 print(branch)   
                 print(latest_commit)
                 print("##### END ERROR")
-    print(fileSet)
-    return fileSet
+    print(fileDict)
+    return fileDict
 
 def clone(giturl:str, repositoryPath:path):
     print("clone")
