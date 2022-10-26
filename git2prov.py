@@ -39,8 +39,6 @@ def throw(prov, error):
 
 if __name__ == "__main__":
 
-    # git@github.com:arbertrary/Git2PROVpy.git
-    # C:\Users\abernstetter\Repositories\Git2PROVpy\testrepo
     # print("test")
     print(gitUrl)
     print(serialization)
