@@ -40,9 +40,9 @@ def throw(prov, error):
 if __name__ == "__main__":
 
     # print("test")
-    print(gitUrl)
-    print(serialization)
-    print(tempDir)
+    # print(gitUrl)
+    # print(serialization)
+    # print(tempDir)
     # throw("test", "error")
 
     convert(gitUrl, serialization, repositoryPath, requestUrl, options, throw)
