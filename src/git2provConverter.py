@@ -23,6 +23,7 @@ def convert(giturl: str, serialization, repositoryPath, requestUrl, options, cal
     provObject = convertRepositoryToProv(
         repo, serialization, requestUrl, options)
     print(provObject.serialize(indent=2))
+    # print(provObject.get_provn())
 
 
 def getPrefixes(urlprefix: str, requestUrl: str, serialization):
@@ -93,7 +94,7 @@ We convert git concepts to PROV concepts as follows:
 def getCommitObj(urlprefix: str, commitTuple: Tuple[pygit2.Oid, List[Tuple[str, str]]], repo: pygit2.Repository, provBundle: prov.ProvBundle):
     commit: pygit2.Commit = repo.get(commitTuple[0])
 
-    c = "commit-" + str(commitTuple[0])
+    commit_identifier = "commit-" + str(commitTuple[0])
     commit_time = datetime.fromtimestamp(commit.commit_time)
 
     parents = commit.parents
@@ -109,8 +110,9 @@ def getCommitObj(urlprefix: str, commitTuple: Tuple[pygit2.Oid, List[Tuple[str, 
     subject = commit.message
 
     # Add the commit activity to the activities
+    prov_activity_identifier = urlprefix + ":" + commit_identifier
     prov_activity: prov.ProvActivity = provBundle.activity(
-        urlprefix + ":" + c, commit_time, None, {prov.PROV_LABEL: subject})
+        urlprefix + ":" + commit_identifier, commit_time, None, {prov.PROV_LABEL: subject})
 
     # Check whether agents already exist for author and committer and if not add them to the ProvDocument
     author_agents = provBundle.get_record(urlprefix+":" + author)
@@ -129,13 +131,13 @@ def getCommitObj(urlprefix: str, commitTuple: Tuple[pygit2.Oid, List[Tuple[str, 
         committer_agent = committer_agents[0]
 
     if author == committer:
-        prov_activity.wasAssociatedWith(
-            author_agent, None, {prov.PROV_ROLE: "author, committer"})
+        provBundle.wasAssociatedWith(prov_activity, author_agent, other_attributes={
+                                     prov.PROV_ROLE: "author, committer"}, identifier=urlprefix+":"+commit_identifier+"_"+author + "_assoc")
     else:
-        prov_activity.wasAssociatedWith(
-            author_agent, None, {prov.PROV_ROLE: "author"})
-        prov_activity.wasAssociatedWith(
-            committer_agent, None, {prov.PROV_ROLE: "committer"})
+        provBundle.wasAssociatedWith(prov_activity,
+                                     author_agent, other_attributes={prov.PROV_ROLE: "author"}, identifier=urlprefix+":"+commit_identifier+"_"+author + "_assoc")
+        provBundle.wasAssociatedWith(prov_activity,
+                                     committer_agent, other_attributes={prov.PROV_ROLE: "committer"}, identifier=urlprefix+":"+commit_identifier+"_"+committer + "_assoc")
 
     derived_done = []
     informed_done = []
@@ -145,68 +147,83 @@ def getCommitObj(urlprefix: str, commitTuple: Tuple[pygit2.Oid, List[Tuple[str, 
 
     for f in commitTuple[1]:
 
-        entity = "file-" + re.sub(r'[\/. ]', "-", f[0])
+        file_entity_identifier = "file-" + re.sub(r'[\/. ]', "-", f[0])
 
         modification_type = f[1]
 
+        commit_entity_identifier = urlprefix+":" + \
+            file_entity_identifier+"_"+commit_identifier
         # Check if file_commit entity already exists
-        if len(provBundle.get_record(urlprefix+":"+entity+"_"+c)) == 0:
-            commit_entity = provBundle.entity(urlprefix+":"+entity+"_"+c)
+        if len(provBundle.get_record(commit_entity_identifier)) == 0:
+            commit_entity = provBundle.entity(commit_entity_identifier)
         else:
             commit_entity = provBundle.get_record(
-                urlprefix+":"+entity+"_"+c)[0]
+                commit_entity_identifier)[0]
 
-        provBundle.wasAttributedTo(commit_entity, author_agent, None, {
-                                   prov.PROV_ROLE: "authorship"})
+        provBundle.wasAttributedTo(commit_entity, author_agent, other_attributes={
+                                   prov.PROV_ROLE: "authorship"}, identifier=commit_entity_identifier+"_"+author+"_attr")
 
-        provBundle.specializationOf(commit_entity, urlprefix+":"+entity)
+        provBundle.specializationOf(
+            commit_entity, urlprefix+":"+file_entity_identifier)
 
         if prov_activity not in activity_done:
             wsb = provBundle.wasStartedBy(
-                prov_activity, time=author_time)
+                prov_activity, time=author_time, identifier=prov_activity_identifier+"_start")
             web = provBundle.wasEndedBy(
-                prov_activity, time=commit_time)
+                prov_activity, time=commit_time, identifier=prov_activity_identifier+"_end")
             activity_done.append(prov_activity)
 
         match modification_type:
             case "D":
                 # The file was deleted in this commit
                 provBundle.wasInvalidatedBy(
-                    commit_entity, prov_activity, time=commit_time)
+                    commit_entity, prov_activity, time=commit_time, identifier=commit_entity_identifier+"_inv")
                 break
 
             case "A":
                 # The file was added in this commit
                 provBundle.wasGeneratedBy(
-                    commit_entity, prov_activity, time=commit_time)
+                    commit_entity, prov_activity, time=commit_time, identifier=commit_entity_identifier+"_gen")
                 break
 
             case _:
                 # The file was modified in this commit
+                generation = commit_entity_identifier + "_gen"
                 generated_entity = provBundle.wasGeneratedBy(
-                    commit_entity, prov_activity, time=commit_time)
+                    commit_entity, prov_activity, time=commit_time, identifier=generation)
 
                 for parent in parents:
-                    parentEntityId = urlprefix+":"+entity + \
-                        "_"+c + "_commit-"+str(parent.short_id)
+                    # parent_entity_identifier = urlprefix+":"+entity + \
+                    #     "_"+commit_identifier + "_commit-"+str(parent.short_id)
 
-                    usage = urlprefix+":"+parentEntityId+"_"+c
+                    parent_entity_identifier = file_entity_identifier + \
+                        "_commit-"+str(parent.short_id)
 
-                    if not (prov_activity, parentEntityId) in already_used:
-                        prov_activity.used(parentEntityId, time=author_time)
-                        already_used.append((prov_activity, parentEntityId))
+                    usage = urlprefix+":" + parent_entity_identifier + "_" + commit_identifier + "_use"
 
-                    if not (commit_entity, parentEntityId) in derived_done:
+                    if not (prov_activity, parent_entity_identifier) in already_used:
+                        provBundle.used(prov_activity,
+                                        entity=urlprefix+":" + parent_entity_identifier, time=author_time, identifier=usage)
+                        already_used.append(
+                            (prov_activity, parent_entity_identifier))
+
+                    if not (commit_entity, parent_entity_identifier) in derived_done:
                         # print(derived_done)
                         provBundle.wasDerivedFrom(
-                            generatedEntity=commit_entity, usedEntity=parentEntityId, activity=prov_activity, usage=usage)
-                        derived_done.append((commit_entity, parentEntityId))
+                            generatedEntity=commit_entity,
+                            usedEntity=urlprefix+":" + parent_entity_identifier,
+                            activity=prov_activity,
+                            usage=usage,
+                            generation=generation,
+                            identifier=urlprefix+":"+commit_entity_identifier+"_"+str(parent.short_id)+"_der")
+                        derived_done.append(
+                            (commit_entity, parent_entity_identifier))
                     else:
                         print(derived_done)
 
                     if not (prov_activity, urlprefix+":"+"commit-"+str(parent.short_id)) in informed_done:
                         provBundle.wasInformedBy(
-                            prov_activity, urlprefix+":"+"commit-"+str(parent.short_id))
+                            prov_activity, urlprefix+":"+"commit-"+str(parent.short_id), identifier=urlprefix+":"+commit_identifier+"_"+str(parent.short_id)+"_comm")
                         informed_done.append(
                             (prov_activity, urlprefix+":"+"commit-"+str(parent.short_id)))
 
