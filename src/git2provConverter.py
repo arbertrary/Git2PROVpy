@@ -10,7 +10,8 @@ import re
 
 import shutil
 
-def convert(giturl:str, serialization, repositoryPath, requestUrl, options, callback):
+
+def convert(giturl: str, serialization, repositoryPath, requestUrl, options, callback):
     if ("git@github.com:" in giturl):
         giturl = giturl.replace("git@github.com:", "https://github.com/")
 
@@ -19,40 +20,44 @@ def convert(giturl:str, serialization, repositoryPath, requestUrl, options, call
     repo = clone(giturl, repositoryPath)
     # iterate_repository(repo)
 
-    provObject = convertRepositoryToProv(repo, serialization, requestUrl, options)
+    provObject = convertRepositoryToProv(
+        repo, serialization, requestUrl, options)
     print(provObject.serialize(indent=2))
 
 
-def getPrefixes(urlprefix:str, requestUrl:str, serialization):
+def getPrefixes(urlprefix: str, requestUrl: str, serialization):
     prefixes = {}
     prefixes[urlprefix] = requestUrl+"#"
-    prefixes["fullResult"] = requestUrl.split("&")[0] + "&serialization="+serialization+"#"
+    prefixes["fullResult"] = requestUrl.split(
+        "&")[0] + "&serialization="+serialization+"#"
 
     return prefixes
 
-def convertRepositoryToProv(repo:pygit2.Repository, serialization, requestUrl, options):
+
+def convertRepositoryToProv(repo: pygit2.Repository, serialization, requestUrl, options):
     # set the corresponding variables according to the options
     if (options.get("ignore")):
         ignore = options["ignore"]
     else:
         ignore = []
-   
+
     # determine a QName for the bundle
     urlprefix = "result"
     prefixes = getPrefixes(urlprefix, requestUrl, serialization)
 
     provObject = getProvObject()
     bundle = list(provObject.bundles)[0]
-    
 
-    fileSet, commitDict = iterate_repository(repo, short=True)
+    # get_repo_log(repo)
+    fileSet, commitDict = get_repo_log(repo, short=True)
+    # fileSet, commitDict = iterate_repository_head(repo, short=True)
     for name in fileSet:
         #  Because all identifiers need to be QNames in PROV, and we need valid turtle as well, we need to get rid of the slashes, spaces and dots
-        currentEntity = re.sub(r'[\/. ]',"-", name) 
+        currentEntity = re.sub(r'[\/. ]', "-", name)
 
         # add entity to prov
-        bundle.entity(urlprefix+":file-"+currentEntity, {"prov:label":name})
-    
+        bundle.entity(urlprefix+":file-"+currentEntity, {"prov:label": name})
+
     for commit in commitDict:
         # print(commit)
         # print(commitDict[commit])
@@ -61,126 +66,258 @@ def convertRepositoryToProv(repo:pygit2.Repository, serialization, requestUrl, o
 
     return provObject
 
-def getCommitObj(urlprefix:str, commitTuple: Tuple[pygit2.Oid, List[Tuple[str, str]]], repo:pygit2.Repository, provBundle: prov.ProvBundle):
-    commit:pygit2.Commit = repo.get(commitTuple[0])
+
+"""
+We convert git concepts to PROV concepts as follows:
+
+  commit c with subject s ---> activity(c, [prov:label="s"])
+  file f   ---> entity(f)
+  author a ---> agent(a)
+               ---> wasAssociatedWith(c, a, [prov:role="author"])
+               ---> wasAttributedTo(f_c, a, [prov:type="authorship"])
+  committer ca ---> agent(ca)
+               ---> wasAssociatedWith(c, ca, [prov:role="committer"])
+  author date ad ---> wasStartedBy(c, -, -, ad)
+  commit date cd ---> wasEndedBy(c, -, -, cd)
+  file f in commit c ---> specializationOf(f_c, f)
+  file f_c added in commit c ---> wasGeneratedBy(f_c, c, authordate)
+  file f_c in commit c modified f_c2 from parent commit c2
+    ---> wasGeneratedBy(f_c, c, authordate)
+    ---> used(c, f_c2, authordate)
+    ---> wasDerivedFrom(f_c, f_c2, c)
+    ---> wasInformedBy(c, c2)
+  file f_c deleted in commit c ---> wasInvalidatedBy(f_c, c, authordate)
+"""
 
 
-    id = "commit-" + str(commitTuple[0])
-    commit_time =     datetime.fromtimestamp(commit.commit_time)
+def getCommitObj(urlprefix: str, commitTuple: Tuple[pygit2.Oid, List[Tuple[str, str]]], repo: pygit2.Repository, provBundle: prov.ProvBundle):
+    commit: pygit2.Commit = repo.get(commitTuple[0])
+
+    c = "commit-" + str(commitTuple[0])
+    commit_time = datetime.fromtimestamp(commit.commit_time)
 
     parents = commit.parents
-    
+
     author_label = commit.author.name
-    author = "user-"+ re.sub(r'[\/. ]',"-", author_label)
+    author = "user-" + re.sub(r'[\/. ]', "-", author_label)
     author_time = datetime.fromtimestamp(commit.author.time)
-    
+
     committer_label = commit.committer.name
-    committer = "user-" + re.sub(r'[\/. ]',"-", committer_label)
+    committer = "user-" + re.sub(r'[\/. ]', "-", committer_label)
     committer_time = datetime.fromtimestamp(commit.committer.time)
 
     subject = commit.message
 
     # Add the commit activity to the activities
-    prov_activity:prov.ProvActivity = provBundle.activity(urlprefix + ":"+ id,commit_time, None, {prov.PROV_LABEL: subject})
-    
+    prov_activity: prov.ProvActivity = provBundle.activity(
+        urlprefix + ":" + c, commit_time, None, {prov.PROV_LABEL: subject})
 
     # Check whether agents already exist for author and committer and if not add them to the ProvDocument
-    author_agents = provBundle.get_record(urlprefix+":"+ author)
+    author_agents = provBundle.get_record(urlprefix+":" + author)
     if len(author_agents) == 0:
-        author_agent: prov.ProvAgent = provBundle.agent(urlprefix+":"+ author, {prov.PROV_LABEL: author_label})
+        author_agent: prov.ProvAgent = provBundle.agent(
+            urlprefix+":" + author, {prov.PROV_LABEL: author_label})
     else:
         author_agent = author_agents[0]
 
-    committer_agents = provBundle.get_record(urlprefix+":"+ committer)
-    
+    committer_agents = provBundle.get_record(urlprefix+":" + committer)
+
     if len(committer_agents) == 0:
-        committer_agent = provBundle.agent(urlprefix+":"+committer, {prov.PROV_LABEL: committer_label})
+        committer_agent = provBundle.agent(
+            urlprefix+":"+committer, {prov.PROV_LABEL: committer_label})
     else:
         committer_agent = committer_agents[0]
 
-    prov_activity.wasAssociatedWith(author_agent, None, {prov.PROV_ROLE: "author"})
-    prov_activity.wasAssociatedWith(committer_agent, None, {prov.PROV_ROLE: "committer"})
+    if author == committer:
+        prov_activity.wasAssociatedWith(
+            author_agent, None, {prov.PROV_ROLE: "author, committer"})
+    else:
+        prov_activity.wasAssociatedWith(
+            author_agent, None, {prov.PROV_ROLE: "author"})
+        prov_activity.wasAssociatedWith(
+            committer_agent, None, {prov.PROV_ROLE: "committer"})
 
+    derived_done = []
+    informed_done = []
+    already_used = []
 
-    for file in commitTuple[1]:
+    activity_done = []
 
-        entity = "file-"+ re.sub(r'[\/. ]',"-", file[0])
-        
-        modification_type = file[1]
+    for f in commitTuple[1]:
+
+        entity = "file-" + re.sub(r'[\/. ]', "-", f[0])
+
+        modification_type = f[1]
 
         # Check if file_commit entity already exists
-        if len(provBundle.get_record(urlprefix+":"+entity+"_"+id)) == 0:
-            commit_entity = provBundle.entity(urlprefix+":"+entity+"_"+id)
+        if len(provBundle.get_record(urlprefix+":"+entity+"_"+c)) == 0:
+            commit_entity = provBundle.entity(urlprefix+":"+entity+"_"+c)
         else:
-            commit_entity = provBundle.get_record(urlprefix+":"+entity+"_"+id)[0]
+            commit_entity = provBundle.get_record(
+                urlprefix+":"+entity+"_"+c)[0]
 
-        provBundle.wasAttributedTo(commit_entity, author_agent, None, {prov.PROV_ROLE: "authorship"})
-
-        wsb = provBundle.wasStartedBy(prov_activity, time=commit_time)
+        provBundle.wasAttributedTo(commit_entity, author_agent, None, {
+                                   prov.PROV_ROLE: "authorship"})
 
         provBundle.specializationOf(commit_entity, urlprefix+":"+entity)
 
-        web = provBundle.wasEndedBy(prov_activity, time=commit_time)
+        if prov_activity not in activity_done:
+            wsb = provBundle.wasStartedBy(
+                prov_activity, time=author_time)
+            web = provBundle.wasEndedBy(
+                prov_activity, time=commit_time)
+            activity_done.append(prov_activity)
 
         match modification_type:
             case "D":
                 # The file was deleted in this commit
-                provBundle.wasInvalidatedBy(commit_entity, prov_activity, time=commit_time)
+                provBundle.wasInvalidatedBy(
+                    commit_entity, prov_activity, time=commit_time)
+                break
 
             case "A":
                 # The file was added in this commit
-                provBundle.wasGeneratedBy(commit_entity, prov_activity, time=commit_time)            
+                provBundle.wasGeneratedBy(
+                    commit_entity, prov_activity, time=commit_time)
+                break
 
-            case other:
+            case _:
                 # The file was modified in this commit
-                provBundle.wasGeneratedBy(commit_entity, prov_activity, time=commit_time)
+                generated_entity = provBundle.wasGeneratedBy(
+                    commit_entity, prov_activity, time=commit_time)
+
                 for parent in parents:
-                    parentEntityId = urlprefix+":"+entity+"_"+id +"_commit-"+str(parent.short_id)
-                    usage = urlprefix+":"+parentEntityId+"_"+id
+                    parentEntityId = urlprefix+":"+entity + \
+                        "_"+c + "_commit-"+str(parent.short_id)
 
-                    prov_activity.used(parentEntityId)
+                    usage = urlprefix+":"+parentEntityId+"_"+c
 
-                    provBundle.wasDerivedFrom(generatedEntity=commit_entity, usedEntity=parentEntityId, activity=prov_activity)
-                    
-                    provBundle.wasInformedBy(prov_activity, urlprefix+":"+"commit-"+str(parent.short_id))
+                    if not (prov_activity, parentEntityId) in already_used:
+                        prov_activity.used(parentEntityId, time=author_time)
+                        already_used.append((prov_activity, parentEntityId))
+
+                    if not (commit_entity, parentEntityId) in derived_done:
+                        # print(derived_done)
+                        provBundle.wasDerivedFrom(
+                            generatedEntity=commit_entity, usedEntity=parentEntityId, activity=prov_activity, usage=usage)
+                        derived_done.append((commit_entity, parentEntityId))
+                    else:
+                        print(derived_done)
+
+                    if not (prov_activity, urlprefix+":"+"commit-"+str(parent.short_id)) in informed_done:
+                        provBundle.wasInformedBy(
+                            prov_activity, urlprefix+":"+"commit-"+str(parent.short_id))
+                        informed_done.append(
+                            (prov_activity, urlprefix+":"+"commit-"+str(parent.short_id)))
 
         # updateProv(urlprefix, provBundle, commitObject)
-   
 
-def updateProv(urlprefix:str, provBundle: prov.ProvBundle, commitObject:Dict):
+
+def updateProv(urlprefix: str, provBundle: prov.ProvBundle, commitObject: Dict):
     # c = provBundle.activity(urlprefix + ":"+ commitObject["id"],commitObject["commit_time"], None, {prov.PROV_LABEL: commitObject["subject"]})
 
-    e = provBundle.entity(urlprefix+":"+commitObject["entity"]+"_"+commitObject["id"])
-    wsb = provBundle.wasStartedBy(commitObject["commitActivity"], time=commitObject["commit_time"])
+    e = provBundle.entity(
+        urlprefix+":"+commitObject["entity"]+"_"+commitObject["id"])
+    wsb = provBundle.wasStartedBy(
+        commitObject["commitActivity"], time=commitObject["commit_time"])
 
     provBundle.specializationOf(e, urlprefix+":"+commitObject["entity"])
 
-    web = provBundle.wasEndedBy(commitObject["commitActivity"], time=commitObject["commit_time"])
-    
+    web = provBundle.wasEndedBy(
+        commitObject["commitActivity"], time=commitObject["commit_time"])
 
 
+def get_repo_log(repo, short=False):
+    head = repo.head
+    commitDict = {}
+    fileSet = set()
+    for entry in head.log():
 
-# def iterate_tree(tree:pygit2.Tree, fileList:Set[Tuple[pygit2.Oid, str]],commit_id, prefix:str=""):
-def iterate_tree(tree:pygit2.Tree, fileDict:Dict,commit_id, prefix:str=""):
-    # print(commit_id)
-    # if (prefix != ""):
-    #     for obj in tree:                 # Iteration
-    #         print(obj.id, obj.type_str, obj.name)
-    #         # TODO: Why does the "screenshot" tree list ALL screenshot files? Shouldn't it be only one? because only one screenshot is added per commit?
-    #  TODO: https://stackoverflow.com/a/28389889
-        
-    #     return fileDict
+        commit = repo.get(entry.oid_new)
+        prev = repo.get(entry.oid_old)
 
-    for obj in tree:
-        if (obj.type_str == "blob"):
-            if (fileDict.get(prefix+obj.name)):
-                fileDict[prefix+obj.name].add(obj.id)
-            else:
-                fileDict[prefix+obj.name] = set([obj.id])
-            # fileList.add((commit_id, obj.id, prefix + obj.name))
+        if short:
+            commit_id = commit.short_id
+            # prev_id = prev.short_id
         else:
-            iterate_tree(obj, fileDict,commit_id, prefix=obj.name+"/")
-    return fileDict
+            commit_id = entry.oid_new
+            # prev_id = entry.oid_old
+
+        if prev:
+            diff = commit.tree.diff_to_tree(prev.tree, swap=True)
+        else:
+            diff = commit.tree.diff_to_tree(swap=True)
+
+        diffList = []
+        for patch in diff:
+            # A, D, or M for added, deleted or modified
+            modification_type = patch.delta.status_char()
+
+            file = patch.delta.new_file.path
+
+            fileSet.add(file)
+
+            diffList.append((file, modification_type))
+            # print(file, modification_type)
+
+        # commitDict[commit_id] = {"parent": prev_id, "diff": diffList}
+        commitDict[commit_id] = diffList
+
+    return fileSet, commitDict
+
+
+def iterate_repository_head(repo, short=False):
+    """
+
+    @returns fileSet, commitDict: a tuple containing the set of all files that ever existed in the repository, and a dict of all commits and the files that they modified
+
+    Iterate the given repository to find all filenames, and all commits plus the files modified by them
+    """
+    # fileSet:Set[Tuple[pygit2.Oid, str]] = set()
+    fileDict: Dict = {}
+    fileSet = set()
+    commitDict = {}
+    # print("# ITERATE REPO")
+    latest_commit = repo.head.target
+    # print(latest_commit)
+    prev = repo[repo.head.target].parents[0]
+    # if (type(latest_commit) != str):
+    try:
+        for commit in repo.walk(latest_commit):
+            # print(commit)
+
+            if short:
+                hash = commit.short_id
+            else:
+                hash = commit.id
+
+            if (prev is not None):
+                diff = commit.tree.diff_to_tree(prev.tree)
+                # print(diff)
+
+                for patch in diff:
+                    # A, D, or M for added, deleted or modified
+                    modification_type = patch.delta.status_char()
+
+                    file = patch.delta.new_file.path
+
+                    fileSet.add(file)
+
+                    if commitDict.get(hash):
+                        commitDict[hash].append((file, modification_type))
+                    else:
+                        commitDict[hash] = [(file, modification_type)]
+
+            if commit.parents:
+                prev = commit
+                # commit = commit.parents[0]
+    except ValueError:
+        print("##### START ERROR")
+        print(latest_commit)
+        print("##### END ERROR")
+
+    return fileSet, commitDict
+
 
 def iterate_repository(repo, short=False):
     """
@@ -190,7 +327,7 @@ def iterate_repository(repo, short=False):
     Iterate the given repository to find all filenames, and all commits plus the files modified by them
     """
     # fileSet:Set[Tuple[pygit2.Oid, str]] = set()
-    fileDict:Dict = {}
+    fileDict: Dict = {}
     fileSet = set()
     commitDict = {}
     # print("# ITERATE REPO")
@@ -211,19 +348,18 @@ def iterate_repository(repo, short=False):
                     if (prev is not None):
                         diff = commit.tree.diff_to_tree(prev.tree)
                         # print(diff)
-                        
+
                         for patch in diff:
-                            # A, D, or M for added, deleted or modified                           
-                            modification_type = patch.delta.status_char()           
+                            # A, D, or M for added, deleted or modified
+                            modification_type = patch.delta.status_char()
 
                             file = patch.delta.new_file.path
 
                             fileSet.add(file)
-                            
 
-                            
                             if commitDict.get(hash):
-                                commitDict[hash].append((file, modification_type))
+                                commitDict[hash].append(
+                                    (file, modification_type))
                             else:
                                 commitDict[hash] = [(file, modification_type)]
 
@@ -233,17 +369,17 @@ def iterate_repository(repo, short=False):
             except ValueError:
                 print("##### START ERROR")
                 print(branch_name)
-                print(branch)   
+                print(branch)
                 print(latest_commit)
                 print("##### END ERROR")
-
 
     # print(fileSet)
     # print(commitDict)
 
     return fileSet, commitDict
 
-def clone(giturl:str, repositoryPath:path):
+
+def clone(giturl: str, repositoryPath: path):
     """
     @param giturl - the url of a remote repository or path to a local repository
     @param repositoryPath - The directory path for the repository
@@ -254,14 +390,14 @@ def clone(giturl:str, repositoryPath:path):
     """
     # print("clone")
     try:
-        if (giturl == repositoryPath):       
+        if (giturl == repositoryPath):
             repo = pygit2.Repository(repositoryPath)
         else:
             repo = pygit2.clone_repository(giturl, repositoryPath)
 
     except Exception as e:
         print(e)
-    
+
     return repo
 
 
@@ -286,6 +422,3 @@ def getProvObject():
 
     # print(provObject.serialize(indent=2))
     return provObject
-
-
-
