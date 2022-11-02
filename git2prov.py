@@ -10,13 +10,13 @@ from src import convert
 
 args = sys.argv
 
-if (len(args)<2 or len(args)>3 ):
-    print("usage: git2prov git_url [{PROV-JSON,PROV-O,PROV-XML,SVG}]")
+if (len(args) < 2 or len(args) > 3):
+    print("usage: git2prov git_url [{json, rdf, provn, xml}]")
     sys.exit()
 
 gitUrl = args[1]
 
-serialization = args[2] if len(args)>2 else "PROV_JSON"
+serialization = args[2] if len(args) > 2 else "json"
 
 # if len(args) > 2:
 #     serialization = args[2]
@@ -25,17 +25,19 @@ serialization = args[2] if len(args)>2 else "PROV_JSON"
 
 tempDir = os.path.join(tempfile.gettempdir(), "git2prov", str(os.getpid()))
 requestUrl = 'http://localhost/'
-options = { "shortHashes": True }
+options = {"shortHashes": True}
 
 if (os.path.exists(gitUrl)):
     repositoryPath = gitUrl
 else:
     repositoryPath = tempDir
 
+
 def throw(prov, error):
-    if(error):
-        raise(BaseException)
+    if (error):
+        raise (BaseException)
     print(prov)
+
 
 if __name__ == "__main__":
 

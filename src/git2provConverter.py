@@ -22,7 +22,7 @@ def convert(giturl: str, serialization, repositoryPath, requestUrl, options, cal
 
     provObject = convertRepositoryToProv(
         repo, serialization, requestUrl, options)
-    print(provObject.serialize(indent=2))
+    print(provObject.serialize(format=serialization))
     # print(provObject.get_provn())
 
 
