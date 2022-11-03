@@ -57,9 +57,8 @@ def convertRepositoryToProv(repo: pygit2.Repository, serialization, requestUrl, 
     provObject = getProvObject(prefixes, urlprefix)
     bundle = list(provObject.bundles)[0]
 
-    # get_repo_log(repo)
-    fileSet, commitDict = get_repo_log(repo, short=True)
-    # fileSet, commitDict = iterate_repository_head(repo, short=True)
+    fileSet, commitDict = iterate_repository_head(
+        repo, short=options["shortHashes"])
     for name in fileSet:
         #  Because all identifiers need to be QNames in PROV, and we need valid turtle as well, we need to get rid of the slashes, spaces and dots
         currentEntity = re.sub(r'[\/. ]', "-", name)
@@ -250,47 +249,6 @@ def updateProv(urlprefix: str, provBundle: prov.ProvBundle, commitObject: Dict):
 
     web = provBundle.wasEndedBy(
         commitObject["commitActivity"], time=commitObject["commit_time"])
-
-
-def get_repo_log(repo, short=False):
-    head = repo.head
-
-    commitDict = {}
-    fileSet = set()
-    for entry in head.log():
-        print(entry)
-
-        commit = repo.get(entry.oid_new)
-        prev = repo.get(entry.oid_old)
-
-        if short:
-            commit_id = commit.short_id
-            # prev_id = prev.short_id
-        else:
-            commit_id = entry.oid_new
-            # prev_id = entry.oid_old
-
-        if prev:
-            diff = commit.tree.diff_to_tree(prev.tree, swap=True)
-        else:
-            diff = commit.tree.diff_to_tree(swap=True)
-
-        diffList = []
-        for patch in diff:
-            # A, D, or M for added, deleted or modified
-            modification_type = patch.delta.status_char()
-
-            file = patch.delta.new_file.path
-
-            fileSet.add(file)
-
-            diffList.append((file, modification_type))
-            # print(file, modification_type)
-
-        # commitDict[commit_id] = {"parent": prev_id, "diff": diffList}
-        commitDict[commit_id] = diffList
-
-    return fileSet, commitDict
 
 
 def iterate_repository_head(repo, short=False):
