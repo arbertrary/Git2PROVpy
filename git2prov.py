@@ -6,48 +6,57 @@ import os
 import tempfile
 import time
 
+import argparse
+
 from src import convert
 
-args = sys.argv
+# args = sys.argv
 
-if (len(args) < 2 or len(args) > 3):
-    print("usage: git2prov git_url [{json, rdf, provn, xml}]")
-    sys.exit()
+parser = argparse.ArgumentParser(
+    prog="Git2Prov Python", description="Translates a git repository to PROV")
+parser.add_argument("gitUri",
+                    help="The remote or local URL or path to a git repository. A remote repository will be cloned to the destination or the current directory.")
+parser.add_argument(
+    "-o", "--out", help="The filepath for the PROV output file")
+parser.add_argument(
+    "-d", "--dest", help="Destination of the cloned repository. If none is given, clone to current working directory")
+parser.add_argument(
+    "-f", "--format", help="The PROV serialization format. Options: json, rdf, provn, or xml. Default: json")
+parser.add_argument(
+    "--short", help="Whether to use short full git hashes", action="store_true", default=True
+)
 
-gitUrl = args[1]
+args = parser.parse_args()
+# print(type(vars(args)))
 
-serialization = args[2] if len(args) > 2 else "json"
-
-# if len(args) > 2:
-#     serialization = args[2]
-# else:
-#     serialization = "PROV_JSON"
-
-tempDir = os.path.join(tempfile.gettempdir(), "git2prov", str(os.getpid()))
-requestUrl = 'http://localhost/'
-options = {"shortHashes": True}
-
-if (os.path.exists(gitUrl)):
-    repositoryPath = gitUrl
+if args.format and args.format in ["json", "rdf", "provn", "xml"]:
+    serialization = args.format
 else:
-    repositoryPath = tempDir
+    serialization = "json"
+
+if os.path.exists(args.gitUri) and os.path.isdir(args.gitUri) and args.dest:
+    repositoryPath = args.dest
+    giturl = args.gitUri
+elif os.path.exists(args.gitUri):
+    repositoryPath = args.gitUri
+    giturl = args.gitUri
+else:
+    if "git@github.com:" in args.gitUri:
+        giturl = args.gitUri.replace("git@github.com:", "https://github.com/")
+    elif "git@" in args.gitUri:
+        raise ValueError(
+            f"Cloning with an SSH URL is currently only supported for github repositories")
+
+    repoName = args.gitUri.split("/")[-1].removesuffix(".git")
+    repositoryPath = os.path.join(os.getcwd(), repoName)
 
 
-def throw(prov, error):
-    if (error):
-        raise (BaseException)
-    print(prov)
-
+requestUrl = 'http://localhost/'
+options = {"shortHashes": args.short}
 
 if __name__ == "__main__":
-
-    # print("test")
-    # print(gitUrl)
-    # print(serialization)
-    # print(tempDir)
-    # throw("test", "error")
-
-    convert(gitUrl, serialization, repositoryPath, requestUrl, options, throw)
-
-    # time.sleep(4)
-    # shutil.rmtree(tempDir)
+    if args.out:
+        convert(giturl, serialization, repositoryPath,
+                requestUrl, options, args.out)
+    else:
+        convert(giturl, serialization, repositoryPath, requestUrl, options)

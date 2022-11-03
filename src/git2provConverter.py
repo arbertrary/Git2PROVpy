@@ -1,6 +1,7 @@
 from datetime import datetime
 import imp
 from os import path
+import os
 import sys
 from typing import Dict, Tuple, Set, List
 import pygit2
@@ -11,18 +12,25 @@ import re
 import shutil
 
 
-def convert(giturl: str, serialization, repositoryPath, requestUrl, options, callback):
-    if ("git@github.com:" in giturl):
-        giturl = giturl.replace("git@github.com:", "https://github.com/")
+def convert(giturl: str, serialization, repositoryPath, requestUrl, options, out_file=None):
+    # if ("git@github.com:" in giturl):
+    #     giturl = giturl.replace("git@github.com:", "https://github.com/")
 
-    repoName = giturl.split("/")[-1].removesuffix(".git")
+    # repoName = giturl.split("/")[-1].removesuffix(".git")
 
     repo = clone(giturl, repositoryPath)
     # iterate_repository(repo)
 
     provObject = convertRepositoryToProv(
         repo, serialization, requestUrl, options)
-    print(provObject.serialize(format=serialization))
+
+    if out_file:
+        # print(provObject.serialize(format=serialization, indent=2))
+        with open(out_file, "w", encoding="utf-8") as f:
+            f.write(provObject.serialize(
+                format=serialization, indent=2))
+    else:
+        print(provObject.serialize(format=serialization, indent=2))
     # print(provObject.get_provn())
 
 
@@ -46,7 +54,7 @@ def convertRepositoryToProv(repo: pygit2.Repository, serialization, requestUrl, 
     urlprefix = "result"
     prefixes = getPrefixes(urlprefix, requestUrl, serialization)
 
-    provObject = getProvObject()
+    provObject = getProvObject(prefixes, urlprefix)
     bundle = list(provObject.bundles)[0]
 
     # get_repo_log(repo)
@@ -246,9 +254,11 @@ def updateProv(urlprefix: str, provBundle: prov.ProvBundle, commitObject: Dict):
 
 def get_repo_log(repo, short=False):
     head = repo.head
+
     commitDict = {}
     fileSet = set()
     for entry in head.log():
+        print(entry)
 
         commit = repo.get(entry.oid_new)
         prev = repo.get(entry.oid_old)
@@ -405,37 +415,31 @@ def clone(giturl: str, repositoryPath: path):
 
     Either clones a remote repository to the repositoryPath or loads a local repository and returns a pygit2 Repository
     """
-    # print("clone")
-    try:
-        if (giturl == repositoryPath):
-            repo = pygit2.Repository(repositoryPath)
-        else:
-            repo = pygit2.clone_repository(giturl, repositoryPath)
 
-    except Exception as e:
-        print(e)
+    if (giturl == repositoryPath) or os.path.exists(repositoryPath):
+        try:
+            repo = pygit2.Repository(repositoryPath)
+        except pygit2.GitError as g:
+            print(g)
+            print(f"pygit2 couldn't load repository {repositoryPath}")
+    else:
+        try:
+            print(f"# Cloning {giturl} to {repositoryPath}")
+            repo = pygit2.clone_repository(giturl, repositoryPath)
+        except pygit2.GitError as g:
+            print(g)
+            print(
+                f"pygit2 couldn't clone repository {giturl} to {repositoryPath}")
 
     return repo
 
 
-def getProvObject():
+def getProvObject(prefixes, urlprefix):
     provObject = prov.ProvDocument()
     # provObject.set_default_namespace("http://localhost")
-    provObject.add_namespace("result", "http://localhost")
-    provObject.add_namespace("fullResult", "placeholder")
+    provObject.add_namespace(urlprefix, prefixes[urlprefix])
+    provObject.add_namespace("fullResult", prefixes["fullResult"])
 
-    # provObject.entity("e01")
-    # e1 = provObject.entity('result:test.html')
+    provBundle = provObject.bundle(f"{urlprefix}:provenance")
 
-    provBundle = provObject.bundle("result:provenance")
-    # altBundle = provObject.bundle("fullResult:provenance")
-
-    # provBundle.entity("result:file-screenshots")
-    # Entity: now:employment-article-v1.html
-    # Agent: nowpeople:Bob
-    # provObject.agent('result:Bob')
-
-    # provObject.add_bundle(provBundle)
-
-    # print(provObject.serialize(indent=2))
     return provObject
