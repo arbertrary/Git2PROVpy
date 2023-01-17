@@ -33,8 +33,14 @@ def convert(giturl: str, serialization: str, repository_path: str, request_url, 
         with open(out_file, "w", encoding="utf-8") as f:
             f.write(prov_document.serialize(
                 format=serialization, indent=2))
-    else:
+    if options.get("print"):
         print(prov_document.serialize(format=serialization, indent=2))
+
+    if options.get("graph"):
+        graph = provg.prov_to_graph(prov_document)
+        print(graph)
+
+    return prov_document.serialize(format=serialization, indent=2)
 
 
 def getPrefixes(urlprefix: str, request_url: str, serialization):
@@ -71,6 +77,9 @@ def convert_repository_to_prov(repo: pygit2.Repository, serialization, requestUr
     prefixes = getPrefixes(urlprefix, requestUrl, serialization)
 
     prov_document = get_prov_document(prefixes, urlprefix)
+    # bundle = prov_document
+    repo_structure_to_prov(urlprefix, repo, prov_document)
+
     bundle = list(prov_document.bundles)[0]
 
     files_set, commits_dict = iterate_repository_head(
@@ -83,7 +92,7 @@ def convert_repository_to_prov(repo: pygit2.Repository, serialization, requestUr
 
         # add file entity to prov
         file_entity = bundle.entity(
-            file_entity_identifier, {"prov:label": file})
+            file_entity_identifier, {"prov:label": file, prov.PROV_TYPE: "file"})
 
     for commit in commits_dict:
         commitTuple = (commit, commits_dict[commit])
@@ -294,6 +303,22 @@ def update_prov_document(urlprefix: str, commitTuple: Tuple[pygit2.Oid, List[Tup
                             identifier=urlprefix + ":" + commit_identifier + "_" + str(parent.short_id) + "_comm")
                         informed_done.append(
                             (commit_activity, urlprefix + ":" + "commit-" + str(parent.short_id)))
+
+
+def repo_structure_to_prov(urlprefix: str, repo: pygit2.Repository, prov_document: prov.ProvDocument):
+    local_branches = list(repo.branches.local)
+    remote_branches = list(repo.branches.remote)
+
+    for b in local_branches:
+
+        print(b)
+        test = repo.revparse(b)
+        print(test)
+        prov_document.entity(f"{urlprefix}:branch-{b}-local",
+                             other_attributes={prov.PROV_TYPE: "branch", "prov:checkedout": repo.branches[b].is_checked_out()})
+    for b in remote_branches:
+        prov_document.entity(
+            f"{urlprefix}:branch-{b}-remote", other_attributes={prov.PROV_TYPE: "branch", "prov:checkedout": repo.branches[b].is_checked_out()})
 
 
 def iterate_repository_head(repo: pygit2.Repository, short=False):

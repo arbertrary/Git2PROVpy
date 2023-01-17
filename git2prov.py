@@ -24,7 +24,7 @@ parser.add_argument(
 parser.add_argument(
     "-f", "--format", help="The PROV serialization format. Options: json, rdf, provn, or xml. Default: json")
 parser.add_argument(
-    "--short", help="Whether to use short full git hashes", action="store_true", default=True
+    "--short", help="Whether to use short of full git hashes", action="store_true", default=True
 )
 
 args = parser.parse_args()
@@ -68,7 +68,8 @@ options = {"shortHashes": args.short}
 
 if __name__ == "__main__":
     if args.out:
-        convert(giturl, serialization, repositoryPath,
-                requestUrl, options, args.out)
+        ret = convert(giturl, serialization, repositoryPath,
+                      requestUrl, options, args.out)
     else:
-        convert(giturl, serialization, repositoryPath, requestUrl, options)
+        ret = convert(giturl, serialization,
+                      repositoryPath, requestUrl, options)
